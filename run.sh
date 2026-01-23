@@ -26,6 +26,8 @@ PARALLEL=true
 KEEP_CONTAINERS=false
 BUILD_IMAGES=false
 VICTIM_TYPE="juice-shop"
+CUSTOM_VICTIM_PORT=""
+CUSTOM_VICTIM_HEALTHCHECK=""
 
 # Print colored message
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
@@ -51,10 +53,12 @@ ${YELLOW}Agent Selection (at least one required):${NC}
   --all                     Use all agents
 
 ${YELLOW}Options:${NC}
-  --victim <type>           Victim server type (default: juice-shop)
-                            juice-shop = OWASP Juice Shop
-                            webgoat    = OWASP WebGoat
-                            vuln-shop  = Custom vulnerable shop
+  --victim <type|image>     Victim server (default: juice-shop)
+                            Presets: juice-shop, webgoat, vuln-shop
+                            Or any Docker image tag (e.g., nginx:latest, myapp:v1)
+  --victim-port <port>      Port for custom victim image (default: 3000)
+  --victim-healthcheck <url> Healthcheck URL for custom image
+                            (default: http://localhost:<port>)
   --mode <report|struct>    Output format (default: report)
                             report = Markdown report
                             struct = JSONL structured data
@@ -69,6 +73,8 @@ ${YELLOW}Examples:${NC}
   $0 --prompt prompts/sqli.txt --claude --mode report
   $0 --prompt prompts/recon.txt --all --mode struct
   $0 --prompt prompts/full.txt --all --sequential --keep
+  $0 --prompt prompts/test.txt --claude --victim nginx:latest --victim-port 80
+  $0 --prompt prompts/test.txt --claude --victim myapp:v1 --victim-port 8080
 
 ${YELLOW}Notes:${NC}
   - Each agent runs in an isolated Docker network with its own victim container
@@ -105,10 +111,14 @@ parse_args() {
                 ;;
             --victim)
                 VICTIM_TYPE="$2"
-                if [[ "$VICTIM_TYPE" != "juice-shop" && "$VICTIM_TYPE" != "webgoat" && "$VICTIM_TYPE" != "vuln-shop" ]]; then
-                    log_error "Invalid victim type: $VICTIM_TYPE (must be 'juice-shop', 'webgoat', or 'vuln-shop')"
-                    exit 1
-                fi
+                shift 2
+                ;;
+            --victim-port)
+                CUSTOM_VICTIM_PORT="$2"
+                shift 2
+                ;;
+            --victim-healthcheck)
+                CUSTOM_VICTIM_HEALTHCHECK="$2"
                 shift 2
                 ;;
             --mode)
@@ -224,6 +234,13 @@ configure_victim() {
                 log_info "Building vuln-shop image from ./victims/vuln-shop..."
                 docker build -t vuln-shop:latest ./victims/vuln-shop
             fi
+            ;;
+        *)
+            # Custom Docker image
+            export VICTIM_IMAGE="$VICTIM_TYPE"
+            export VICTIM_PORT="${CUSTOM_VICTIM_PORT:-3000}"
+            export VICTIM_HEALTHCHECK="${CUSTOM_VICTIM_HEALTHCHECK:-http://localhost:$VICTIM_PORT}"
+            log_info "Using custom victim image: $VICTIM_IMAGE"
             ;;
     esac
     log_info "Victim: $VICTIM_TYPE ($VICTIM_IMAGE:$VICTIM_PORT)"

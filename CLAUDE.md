@@ -78,6 +78,9 @@ cp .env.example .env
 
 # vuln-shop 대상 테스트
 ./run.sh --prompt prompts/attack.txt --claude --victim vuln-shop
+
+# 커스텀 Docker 이미지 사용
+./run.sh --prompt prompts/attack.txt --claude --victim myapp:v1 --victim-port 8080
 ```
 
 ## run.sh 옵션
@@ -86,7 +89,9 @@ cp .env.example .env
 |------|------|--------|
 | `--prompt <file>` | 프롬프트 파일 (필수) | - |
 | `--claude/--codex/--gemini/--all` | 에이전트 선택 (최소 1개 필수) | - |
-| `--victim <type>` | `juice-shop`, `webgoat`, `vuln-shop` | `juice-shop` |
+| `--victim <type\|image>` | 프리셋(`juice-shop`, `webgoat`, `vuln-shop`) 또는 Docker 이미지 태그 | `juice-shop` |
+| `--victim-port <port>` | 커스텀 이미지의 포트 | `3000` |
+| `--victim-healthcheck <url>` | 커스텀 이미지의 헬스체크 URL | `http://localhost:<port>` |
 | `--mode <format>` | `report` (Markdown), `struct` (JSONL) | `report` |
 | `--output-format <file>` | 커스텀 출력 형식 템플릿 | 기본 템플릿 |
 | `--sequential` | 순차 실행 | 병렬 |
@@ -210,11 +215,24 @@ tail -100 logs/*_claude.txt
 
 ## Victim 서버 옵션
 
+### 프리셋
 | Type | 이미지 | 포트 | 설명 |
 |------|--------|------|------|
 | `juice-shop` | `bkimminich/juice-shop` | 3000 | OWASP Juice Shop |
 | `webgoat` | `webgoat/webgoat` | 8080 | OWASP WebGoat |
 | `vuln-shop` | `vuln-shop:latest` (로컬 빌드) | 3000 | 커스텀 취약 쇼핑몰 |
+
+### 커스텀 이미지
+프리셋 외의 값은 Docker 이미지 태그로 인식됩니다:
+```bash
+# nginx:latest 이미지, 포트 80
+./run.sh --prompt p.txt --claude --victim nginx:latest --victim-port 80
+
+# 로컬 빌드 이미지, 커스텀 헬스체크
+./run.sh --prompt p.txt --claude --victim myapp:v1 \
+    --victim-port 8080 \
+    --victim-healthcheck "http://localhost:8080/health"
+```
 
 ## 트러블슈팅
 
