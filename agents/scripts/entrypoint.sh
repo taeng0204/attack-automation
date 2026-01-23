@@ -87,6 +87,9 @@ echo "Victim is reachable!"
 echo "Starting attack with $AGENT_TYPE agent..."
 echo ""
 
+# Create output directories (may not exist if not volume-mounted)
+mkdir -p /results /logs
+
 # Create empty result file (model will write to it)
 touch "$RESULT_FILE"
 

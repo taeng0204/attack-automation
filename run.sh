@@ -246,6 +246,25 @@ build_images() {
     log_info "All images built successfully"
 }
 
+# Extract results from a container using docker cp
+extract_results() {
+    local agent=$1
+    log_info "[$agent] Extracting results from container..."
+
+    # Extract results and logs from the container's tmpfs
+    docker cp "agent-$agent:/results/." "./results/" 2>/dev/null || true
+    docker cp "agent-$agent:/logs/." "./logs/" 2>/dev/null || true
+
+    log_info "[$agent] Results extracted"
+}
+
+# Remove agent container
+remove_agent_container() {
+    local agent=$1
+    log_info "[$agent] Removing container..."
+    docker compose rm -f "agent-$agent" 2>/dev/null || true
+}
+
 # Run a single agent with its isolated victim
 run_agent() {
     local agent=$1
@@ -271,6 +290,14 @@ run_agent() {
     # Run agent
     log_info "[$agent] Executing attack..."
     docker compose up "agent-$agent"
+
+    # Extract results from container (tmpfs)
+    extract_results "$agent"
+
+    # Remove agent container if not keeping
+    if [[ "$KEEP_CONTAINERS" == "false" ]]; then
+        remove_agent_container "$agent"
+    fi
 
     log_info "[$agent] Completed"
 }
@@ -379,6 +406,20 @@ main() {
 
         if [[ $failed -eq 1 ]]; then
             log_warn "Some agents failed"
+        fi
+
+        # Extract results from all containers (tmpfs)
+        log_step "Extracting results from all agents..."
+        for agent in "${AGENTS[@]}"; do
+            extract_results "$agent"
+        done
+
+        # Remove agent containers if not keeping
+        if [[ "$KEEP_CONTAINERS" == "false" ]]; then
+            log_step "Removing agent containers..."
+            for agent in "${AGENTS[@]}"; do
+                remove_agent_container "$agent"
+            done
         fi
     else
         log_step "Running agents sequentially (each with isolated victim)..."

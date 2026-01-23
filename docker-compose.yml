@@ -51,8 +51,6 @@ services:
     volumes:
       - ./prompts:/prompts:ro
       - ./output_formats:/output_formats:ro
-      - ./results:/results
-      - ./logs:/logs
     depends_on:
       victim-codex:
         condition: service_healthy
@@ -90,8 +88,6 @@ services:
     volumes:
       - ./prompts:/prompts:ro
       - ./output_formats:/output_formats:ro
-      - ./results:/results
-      - ./logs:/logs
     depends_on:
       victim-claude:
         condition: service_healthy
@@ -129,8 +125,6 @@ services:
     volumes:
       - ./prompts:/prompts:ro
       - ./output_formats:/output_formats:ro
-      - ./results:/results
-      - ./logs:/logs
     depends_on:
       victim-gemini:
         condition: service_healthy
