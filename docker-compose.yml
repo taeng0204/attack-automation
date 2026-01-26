@@ -19,6 +19,37 @@ networks:
 
 services:
   # ===========================================
+  # METRICS PROXY (LiteLLM)
+  # ===========================================
+  # Central proxy for token/call tracking across all agents
+  metrics-proxy:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: metrics-proxy
+    command: ["--config", "/app/config.yaml", "--detailed_debug"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LITELLM_LOG=DEBUG
+      - METRICS_LOG_DIR=/app/logs
+      - PYTHONPATH=/app
+    volumes:
+      - ./metrics/litellm_config.yaml:/app/config.yaml:ro
+      - ./metrics/custom_logger.py:/app/custom_logger.py:ro
+      - ./metrics/logs:/app/logs
+    networks:
+      - net-claude
+      - net-codex
+      - net-gemini
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "4000:4000"  # Debug access (optional)
+
+  # ===========================================
   # CODEX ENVIRONMENT (Isolated)
   # ===========================================
   victim-codex:
@@ -43,6 +74,7 @@ services:
       - net-codex
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=http://metrics-proxy:4000
       - AGENT_TYPE=codex
       - OUTPUT_MODE=${OUTPUT_MODE:-report}
       - OUTPUT_FORMAT_FILE=${OUTPUT_FORMAT_FILE:-}
@@ -53,6 +85,8 @@ services:
       - ./output_formats:/output_formats:ro
     depends_on:
       victim-codex:
+        condition: service_healthy
+      metrics-proxy:
         condition: service_healthy
 
   # ===========================================
@@ -80,6 +114,7 @@ services:
       - net-claude
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_BASE_URL=http://metrics-proxy:4000
       - AGENT_TYPE=claude
       - OUTPUT_MODE=${OUTPUT_MODE:-report}
       - OUTPUT_FORMAT_FILE=${OUTPUT_FORMAT_FILE:-}
@@ -90,6 +125,8 @@ services:
       - ./output_formats:/output_formats:ro
     depends_on:
       victim-claude:
+        condition: service_healthy
+      metrics-proxy:
         condition: service_healthy
 
   # ===========================================
@@ -117,6 +154,7 @@ services:
       - net-gemini
     environment:
       - GEMINI_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_GEMINI_BASE_URL=http://metrics-proxy:4000
       - AGENT_TYPE=gemini
       - OUTPUT_MODE=${OUTPUT_MODE:-report}
       - OUTPUT_FORMAT_FILE=${OUTPUT_FORMAT_FILE:-}
@@ -127,6 +165,8 @@ services:
       - ./output_formats:/output_formats:ro
     depends_on:
       victim-gemini:
+        condition: service_healthy
+      metrics-proxy:
         condition: service_healthy
 
   # ===========================================

@@ -68,6 +68,27 @@ ${FORMAT_INSTRUCTION}"
 
 FULL_PROMPT="${PROMPT}${FORMAT_INSTRUCTION}"
 
+# Wait for metrics proxy (if configured)
+PROXY_URL="${ANTHROPIC_BASE_URL:-${OPENAI_BASE_URL:-$GOOGLE_GEMINI_BASE_URL}}"
+if [[ -n "$PROXY_URL" ]]; then
+    echo "Waiting for metrics proxy at $PROXY_URL..."
+    PROXY_RETRIES=0
+    PROXY_MAX_RETRIES=30
+    while ! curl -sf "${PROXY_URL}/health" > /dev/null 2>&1; do
+        PROXY_RETRIES=$((PROXY_RETRIES + 1))
+        if [[ $PROXY_RETRIES -ge $PROXY_MAX_RETRIES ]]; then
+            echo "WARNING: Metrics proxy not reachable after $PROXY_MAX_RETRIES attempts"
+            echo "Continuing without metrics tracking..."
+            break
+        fi
+        echo "  Attempt $PROXY_RETRIES/$PROXY_MAX_RETRIES..."
+        sleep 2
+    done
+    if [[ $PROXY_RETRIES -lt $PROXY_MAX_RETRIES ]]; then
+        echo "Metrics proxy is ready!"
+    fi
+fi
+
 # Wait for victim to be reachable
 echo "Waiting for victim to be reachable..."
 MAX_RETRIES=30

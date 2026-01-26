@@ -282,6 +282,85 @@ remove_agent_container() {
     docker compose rm -f "agent-$agent" 2>/dev/null || true
 }
 
+# Extract metrics from LiteLLM proxy
+extract_metrics() {
+    local timestamp=$1
+    log_step "Extracting metrics from proxy..."
+
+    # Extract proxy logs to file for debugging
+    docker logs metrics-proxy 2>&1 > "./metrics/logs/${timestamp}_proxy.log" || true
+
+    # Copy usage.jsonl from proxy container (written by custom_logger.py)
+    docker cp metrics-proxy:/app/logs/usage.jsonl "./metrics/logs/usage.jsonl" 2>/dev/null || true
+
+    # Use aggregate_metrics.py script if available, otherwise inline Python
+    if [[ -f "./scripts/aggregate_metrics.py" ]]; then
+        python3 ./scripts/aggregate_metrics.py "./metrics/logs" --output "./metrics/${timestamp}_summary.json"
+    else
+        # Fallback: inline aggregation
+        python3 - << 'PYEOF' "./metrics/logs" "./metrics/${timestamp}_summary.json"
+import sys
+import json
+from pathlib import Path
+from collections import defaultdict
+from datetime import datetime
+
+log_dir = sys.argv[1]
+output_file = sys.argv[2]
+
+metrics = defaultdict(lambda: {
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_cost_usd": 0.0
+})
+
+try:
+    usage_file = Path(log_dir) / "usage.jsonl"
+    if usage_file.exists():
+        for line in usage_file.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                model = entry.get("model", "unknown")
+                metrics[model]["calls"] += 1
+                metrics[model]["input_tokens"] += entry.get("prompt_tokens", 0)
+                metrics[model]["output_tokens"] += entry.get("completion_tokens", 0)
+                metrics[model]["total_tokens"] += entry.get("total_tokens", 0)
+                metrics[model]["cache_read_tokens"] += entry.get("cache_read_tokens", 0)
+                metrics[model]["total_cost_usd"] += entry.get("cost_usd", 0.0)
+            except json.JSONDecodeError:
+                continue
+
+    result = {
+        "generated_at": datetime.now().isoformat(),
+        "models": dict(metrics),
+        "totals": {
+            "total_calls": sum(m["calls"] for m in metrics.values()),
+            "total_input_tokens": sum(m["input_tokens"] for m in metrics.values()),
+            "total_output_tokens": sum(m["output_tokens"] for m in metrics.values()),
+            "total_tokens": sum(m["total_tokens"] for m in metrics.values()),
+            "total_cost_usd": round(sum(m["total_cost_usd"] for m in metrics.values()), 6)
+        }
+    }
+
+    with open(output_file, 'w') as f:
+        json.dump(result, f, indent=2)
+
+    print(f"Metrics saved to {output_file}", file=sys.stderr)
+except Exception as e:
+    print(f"Error extracting metrics: {e}", file=sys.stderr)
+    with open(output_file, 'w') as f:
+        json.dump({"error": str(e), "models": {}, "totals": {}}, f)
+PYEOF
+    fi
+
+    log_info "Metrics extracted to ./metrics/"
+}
+
 # Run a single agent with its isolated victim
 run_agent() {
     local agent=$1
@@ -366,6 +445,7 @@ main() {
     mkdir -p logs            # Raw model output (debugging)
     mkdir -p prompts
     mkdir -p output_formats  # Output format templates
+    mkdir -p metrics/logs    # Token/call metrics from LiteLLM proxy
 
     # Copy prompt to prompts directory (skip if same file)
     local prompt_realpath=$(realpath "$PROMPT_FILE")
@@ -378,6 +458,25 @@ main() {
     if [[ "$BUILD_IMAGES" == "true" ]] || ! docker images | grep -q "agent-base"; then
         build_images
     fi
+
+    # Start metrics proxy
+    log_step "Starting metrics proxy..."
+    docker compose up -d metrics-proxy
+
+    # Wait for metrics proxy to be healthy
+    log_info "Waiting for metrics proxy to be healthy..."
+    local proxy_wait=0
+    local proxy_max_wait=60
+    while [[ "$(docker inspect --format='{{.State.Health.Status}}' "metrics-proxy" 2>/dev/null)" != "healthy" ]]; do
+        sleep 2
+        proxy_wait=$((proxy_wait + 2))
+        if [[ $proxy_wait -ge $proxy_max_wait ]]; then
+            log_error "Metrics proxy did not become healthy after ${proxy_max_wait}s"
+            docker logs metrics-proxy --tail 20
+            exit 1
+        fi
+    done
+    log_info "Metrics proxy is ready!"
 
     # Run agents
     if [[ "$PARALLEL" == "true" && ${#AGENTS[@]} -gt 1 ]]; then
@@ -445,6 +544,10 @@ main() {
         done
     fi
 
+    # Extract metrics before cleanup
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    extract_metrics "$TIMESTAMP"
+
     # Cleanup
     if [[ "$KEEP_CONTAINERS" == "false" ]]; then
         log_step "Cleaning up containers..."
@@ -457,9 +560,35 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}  Execution Complete${NC}"
     echo -e "${GREEN}========================================${NC}"
-    echo -e "Results saved in: ${BLUE}./results/${NC}"
+    echo -e "Results: ${BLUE}./results/${NC}"
+    echo -e "Logs:    ${BLUE}./logs/${NC}"
+    echo -e "Metrics: ${BLUE}./metrics/${NC}"
     echo ""
+    echo "Results:"
     ls -la results/ 2>/dev/null || echo "(no results yet)"
+    echo ""
+    echo "Metrics summary:"
+    if [[ -f "./metrics/${TIMESTAMP}_summary.json" ]]; then
+        cat "./metrics/${TIMESTAMP}_summary.json" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    if d.get('note'):
+        print(f\"  Note: {d['note']}\")
+    for m, v in d.get('models', {}).items():
+        cost = v.get('total_cost_usd', 0)
+        cost_str = f\", \${cost:.4f}\" if cost > 0 else ''
+        print(f\"  {m}: {v['calls']} calls, {v['total_tokens']} tokens{cost_str}\")
+    t = d.get('totals', {})
+    total_cost = t.get('total_cost_usd', 0)
+    cost_str = f\", \${total_cost:.4f}\" if total_cost > 0 else ''
+    print(f\"  TOTAL: {t.get('total_calls', 0)} calls, {t.get('total_tokens', 0)} tokens{cost_str}\")
+except Exception as e:
+    print(f\"  Error: {e}\")
+" 2>/dev/null || echo "(no metrics available)"
+    else
+        echo "(no metrics summary generated)"
+    fi
     echo ""
 }
 

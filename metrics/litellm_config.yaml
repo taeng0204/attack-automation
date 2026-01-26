@@ -1,0 +1,50 @@
+# LiteLLM Proxy Configuration for Token/Call Tracking
+# ===========================================
+# Routes API calls through proxy for unified metrics collection
+
+model_list:
+  # Claude 모델 (Anthropic)
+  - model_name: claude-opus-4-5-20251101
+    litellm_params:
+      model: claude-opus-4-5-20251101
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet-4-20250514
+    litellm_params:
+      model: claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Codex 모델 (OpenAI)
+  - model_name: gpt-5.2-codex
+    litellm_params:
+      model: gpt-5.2-codex
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Gemini 모델 (Google)
+  - model_name: gemini-3-pro-preview
+    litellm_params:
+      model: gemini/gemini-3-pro-preview
+      api_key: os.environ/GOOGLE_API_KEY
+
+litellm_settings:
+  # JSON 파일 로깅 활성화
+  json_logs: true
+  # 상세 로깅
+  set_verbose: true
+  # 커스텀 콜백 - 토큰 사용량 파일 로깅
+  success_callback: ["custom_logger.metrics_logger"]
+  failure_callback: ["custom_logger.metrics_logger"]
+
+general_settings:
+  # 인증 없이 사용 (격리된 Docker 네트워크에서 실행)
+  disable_spend_logs: false
+  # 로깅 활성화
+  store_model_in_db: false
+
+environment_variables:
+  METRICS_LOG_DIR: /app/logs

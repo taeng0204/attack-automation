@@ -13,9 +13,8 @@ RUN useradd -m -s /bin/bash agent && \
 COPY claude/config/ /home/agent/.claude/
 RUN chown -R agent:agent /home/agent/.claude
 
-# Copy entrypoint script
-COPY scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Copy entrypoint script (--chmod ensures executable even with cached layers)
+COPY --chmod=755 scripts/entrypoint.sh /entrypoint.sh
 
 # Create workspace and set permissions
 RUN mkdir -p /workspace && chown agent:agent /workspace

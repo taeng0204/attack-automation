@@ -10,9 +10,8 @@ RUN mkdir -p /root/.gemini
 # Copy configuration
 COPY gemini/config/ /root/.gemini/
 
-# Copy entrypoint script
-COPY scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Copy entrypoint script (--chmod ensures executable even with cached layers)
+COPY --chmod=755 scripts/entrypoint.sh /entrypoint.sh
 
 # Set working directory
 WORKDIR /workspace
