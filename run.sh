@@ -766,6 +766,24 @@ main() {
         fi
     done
 
+    # Classify HTTP attacks using CRS patterns
+    log_step "Classifying HTTP attacks..."
+    if [[ -f "./scripts/classify_attacks.py" ]]; then
+        local http_logs_dir="./${SESSION_DIR}/http-logs"
+        local analysis_dir="./${SESSION_DIR}/analysis"
+
+        # Check if there are any HTTP logs to classify
+        if ls "$http_logs_dir"/*_http.jsonl 1>/dev/null 2>&1; then
+            python3 ./scripts/classify_attacks.py "$http_logs_dir" -o "$analysis_dir" --summary 2>&1 | \
+                grep -E "(Processing|Classified|Summary|By Attack)" || true
+            log_info "Attack classification complete"
+        else
+            log_warn "No HTTP logs found to classify"
+        fi
+    else
+        log_warn "classify_attacks.py not found, skipping attack classification"
+    fi
+
     # Cleanup
     if [[ "$KEEP_CONTAINERS" == "false" ]]; then
         log_step "Cleaning up containers..."
@@ -808,6 +826,30 @@ except Exception as e:
 " 2>/dev/null || echo "(no metrics available)"
     else
         echo "(no metrics summary generated)"
+    fi
+    echo ""
+
+    # Display attack classification results
+    echo "Attack classification:"
+    if [[ -f "./${SESSION_DIR}/analysis/attack_summary.json" ]]; then
+        python3 -c "
+import sys, json
+try:
+    with open('./${SESSION_DIR}/analysis/attack_summary.json') as f:
+        d = json.load(f)
+    total = d.get('total_requests', 0)
+    attacks = d.get('attack_requests', 0)
+    ratio = d.get('attack_ratio', 0)
+    print(f'  Total requests: {total}, Attack requests: {attacks} ({ratio*100:.1f}%)')
+    dist = d.get('attack_distribution', {})
+    for family, count in sorted(dist.items(), key=lambda x: -x[1]):
+        if family != 'others' and count > 0:
+            print(f'    {family}: {count}')
+except Exception as e:
+    print(f'  Error: {e}')
+" 2>/dev/null || echo "  (classification failed)"
+    else
+        echo "  (no attack classification available)"
     fi
     echo ""
 
