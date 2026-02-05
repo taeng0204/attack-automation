@@ -176,6 +176,12 @@ fi
 # Print output for normal execution
 echo "$OUTPUT"
 
+# Fallback: if agent didn't write to file, save stdout as report
+if [[ ! -s "$RESULT_FILE" ]]; then
+    echo "[Fallback] Agent did not write to file, saving stdout..."
+    echo "$OUTPUT" > "$RESULT_FILE"
+fi
+
 # Exit with original exit code for non-limit errors
 if [[ $EXIT_CODE -ne 0 ]]; then
     echo ""
